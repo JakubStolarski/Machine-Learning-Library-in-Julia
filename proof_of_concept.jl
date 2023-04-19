@@ -1,147 +1,278 @@
-# Layers
-mutable struct DenseLayer
-    in_channels::Int
-    out_channels::Int
-    weights::Array{Float64}
-    activation::Function
-    make_flat::Bool
+using Random
+
+# Define sigmoid function
+sigmoid(x) = 1 / (1 + exp(-x))
+
+# Define model architecture
+struct Model
+    w1::Matrix{Float64}
+    b1::Vector{Float64}
+    w2::Matrix{Float64}
+    b2::Vector{Float64}
 end
 
-mutable struct ConvLayer
-    in_channels::Int
-    out_channels::Int
-    weights::Array{Float64}
-    kernel_size::Int
-    activation::Function
+# Define forward pass through the model
+function forward(model::Model, x::Vector{Float64})
+    a1 = model.w1 * x .+ model.b1
+    h1 = sigmoid.(a1)
+    a2 = model.w2 * h1 .+ model.b2
+    y = softmax(a2)
+    return a1, h1, a2, y
 end
 
-function conv_layer(in_channels::Int, out_channels::Int, kernel_size::Int, activation::Function=nothing)
-    weights = -0.2 .+ (0.2 - (-0.2)) .* randn(Float64, kernel_size, kernel_size, in_channels, out_channels)
-    return ConvLayer(in_channels::Int, out_channels::Int, weights, kernel_size, activation)
+# Define cross-entropy loss function
+function cross_entropy_loss(y_pred, y_true)
+    -sum(y_true .* log.(y_pred))
 end
 
-function dense_layer(in_channels::Int, out_channels::Int, activation::Function=nothing, make_flat::Bool=false) 
-    weights = -0.2 .+ (0.2 - (-0.2)) .* randn(Float32, in_channels, out_channels)
-    return DenseLayer(in_channels::Int, out_channels::Int, weights, activation, make_flat)
+# Define function to calculate gradients with automatic differentiation using a graph
+function backward(model::Model, x::Vector{Float64}, y_true::Vector{Float64})
+    # Forward pass
+    a1, h1, a2, y_pred = forward(model, x)
+
+    # Compute loss
+    loss = cross_entropy_loss(y_pred, y_true)
+
+    # Initialize gradients
+    grad_w1 = zeros(size(model.w1))
+    grad_b1 = zeros(size(model.b1))
+    grad_w2 = zeros(size(model.w2))
+    grad_b2 = zeros(size(model.b2))
+
+    # Backward pass
+    graph = [a1, h1, a2, y_pred]
+    gradients = [nothing, nothing, nothing, y_pred - y_true]
+
+    # Backpropagate through each layer
+    for i = 3:-1:1
+        grad = gradients[i + 1]
+        input = graph[i]
+
+        # Compute gradients of weights and biases
+        grad_w = grad * transpose(graph[i - 1])
+        grad_b = grad
+
+        # Update gradients
+        gradients[i] = transpose(model.w[i]) * grad
+        if i == 3
+            gradients[i] .= gradients[i] .* softmax_gradient(a2)
+        else
+            gradients[i] .= gradients[i] .* sigmoid_gradient(input)
+        end
+        grad_w .= grad_w / size(x, 2)
+        grad_b .= mean(grad_b, dims=2)
+
+        # Update model parameters
+        model.w[i] -= learning_rate * grad_w
+        model.b[i] -= learning_rate * grad_b
+    end
+
+    return loss, model
 end
 
-## Functions
+# Define sigmoid gradient function
+function sigmoid_gradient(x)
+    s = sigmoid.(x)
+    s .* (1 .- s)
+end
+
+# Define softmax function
+function softmax(x)
+    exp.(x) ./ sum(exp.(x))
+end
+
+# Define softmax gradient function
+function softmax_gradient(x)
+    s = softmax(x)
+    s .* (1 .- s)
+end
+
+# Generate random training data
+Random.seed!(123)
+x_train = rand(2, 1000) .* 2 .- 1
+y_train = (sum(x_train, dims=1) .> 0) .+ 1
+
+# Initialize model
+learning_rate = 0.1
+model = Model(randn(4, 2), randn(4), randn(2, 4), randn(2))
+
+
 using LinearAlgebra
-# Layer functions
-function conv(input, kernel, activation=nothing)
+
+function convolution(input::Matrix{Float64}, kernel, activation=nothing)
     input_height, input_width = size(input)
-    kernel_height, kernel_width = size(kernel)
+    kernel_height, kernel_width, in_channels, out_channels = size(kernel)
     output_height = input_height - kernel_height + 1
     output_width = input_width - kernel_width + 1
-    output = zeros(output_height, output_width)
-
-    for i in 1:output_height
-        for j in 1:output_width
-            for k in 1:kernel_height
-                for l in 1:kernel_width
-                    output[i, j] += input[i+k-1, j+l-1] * kernel[k, l]
+    output = zeros(output_height, output_width, out_channels)
+    #print(size(input))
+    #print(size(output))
+    for in_channel in in_channels
+        for out_channel in out_channels
+            for i in 1:output_height
+                for j in 1:output_width
+                    for k in 1:kernel_height
+                        for l in 1:kernel_width
+                            output[i, j, out_channel] += input[i+k-1, j+l-1] * kernel[k, l, in_channel, out_channel]
+                        end
+                    end
                 end
             end
         end
     end
-    
     if activation != nothing
         output = activation(output)
     end
-    
+     #println(size(output))
     return output
 end
 
-function fully_connect(input, weight, activation=nothing)
-    output = weight .* input 
-    if activation != nothing
-        output = activation(output)
-    end
-    
-    return output
-end
-
-# Activation functions
-function relu(x::Union{Matrix, Vector, Array, Int})
-    return max.(0, x)
-end
-
-function pooling(x::Union{Matrix, Vector, Array, Int}, kernel::Int=2, stride::Int=kernel, type::String="max")
-    a = size(x)
-    output_shape = (size(x,1) - kernel) / stride + 1
-    output_shape = trunc(Int, output_shape)
-    output = zeros((output_shape, output_shape))
-
-    for i in 1:output_shape
-        for j in 1:output_shape
-            if type == "max"
-                output[i, j] = maximum(x[i:i+stride,j:j+stride])
-            elseif type == "mean"
-                output[i, j] = mean(x[i:i+stride,j:j+stride])
+function convolution(input::Array{Float64}, kernel, activation=nothing)
+    input_height, input_width, input_channels = size(input)
+    kernel_height, kernel_width, in_channels, out_channels = size(kernel)
+    output_height = input_height - kernel_height + 1
+    output_width = input_width - kernel_width + 1
+    output = zeros(output_height, output_width, out_channels)
+    #print(size(input))
+    #print(size(output))
+    for input_channel in input_channels
+        for in_channel in in_channels
+            for out_channel in out_channels
+                for i in 1:output_height
+                    for j in 1:output_width
+                        for k in 1:kernel_height
+                            for l in 1:kernel_width
+                                output[i, j, out_channel] += input[i+k-1, j+l-1, input_channel] * kernel[k, l, in_channel, out_channel]
+                            end
+                        end
+                    end
+                end
             end
         end
     end
+    if activation != nothing
+        output = activation(output)
+    end
+     #println(size(output))
+    return output
+end
+
+function fully_connected(input, weight, activation=nothing)
+    output = weight * input 
+    if activation != nothing
+        output = activation(output)
+    end
     
     return output
 end
 
-        
+function relu(x::Union{Matrix, Vector, Array, Int, Transpose{Float64, Vector{Float64}}})
+    return max.(0, x)
+end
+
 function softmax(x::Union{Matrix, Vector, Array, Int, LinearAlgebra.Transpose{Float64, Vector{Float64}}}) 
     exp_x = exp.(x)
     return exp_x ./ sum(exp_x)
 end
-        
-        
-function int_to_array(x::Int, length::Int)
-    output = zeros(length)
-    output[x+1] = 1
+
+function softmax_backwards(grad, output)
+    softmax_grad = zeros(size(output))
+    for i in 1:size(output, 1)
+        for j in 1:size(output, 2)
+            if i == j
+                softmax_grad[i, j] = output[i, j] * (1 - output[i, j])
+            else
+                softmax_grad[i, j] = -output[i, j] * output[j, i]
+            end
+        end
+    end
+    
+    grad_input = softmax_grad * grad
+    
+    return grad_input
+end
+
+function pooling(x::Union{Matrix, Vector, Array, Int}, kernel::Int=2, stride::Int=kernel, pool_type::String="max")
+    channels = size(x,3)
+    output_shape = (size(x,1) - kernel) / stride + 1
+    output_shape = trunc(Int, output_shape)
+    output = zeros((output_shape, output_shape, channels))
+    #println(size(output))
+    for channel in 1:channels
+        for i in 1:output_shape
+            for j in 1:output_shape
+                if pool_type == "max"
+                    output[i, j, channel] = maximum(x[i:i+stride,j:j+stride, channel])
+                elseif pool_type == "mean"
+                    output[i, j, channel] = mean(x[i:i+stride,j:j+stride, channel])
+                end
+            end
+        end
+    end
+    #println(size(output))        
     return output
 end
-        
-# Loss function        
-function cross_entropy_loss(pred::Union{Matrix, Vector, Array}, dest::Union{Int,Variable,Constant})
-    num_of_classes = Constant(size(pred)[2])
-    label = Constant(int_to_array(dest, num_of_classes))
-    loss = -sum(dest .* log.(pred))/num_of_classes
-    return loss
-end
 
-function cross_entropy_loss(pred::Union{Matrix, Vector, Array}, dest::Vector{Number})
+function cross_entropy_loss(pred::Union{Matrix, Vector, Array}, dest::Int)
     num_of_classes = size(pred)[2]
-    loss = []
-    for id in 1:size(dest)
-        label = int_to_array(dest[id], num_of_classes)
-        push!(loss, -sum(label .* log.(pred[id]))/num_of_classes)
-    end
+    label = int_to_array(dest, num_of_classes)
+    loss = -sum((label .* log.(pred1)))/num_of_classes
     return loss
 end
-        
-# Optimizer  
-function SGD!(w::Union{Matrix, Vector, Array, Int}, lr::Number, g::Matrix)
-    w .-= lr .* dw
+
+function cross_entropy_loss_backwards(grad, pred, dest)
+    num_of_classes = size(pred)[2]
+    label = int_to_array(dest, num_of_classes)
+    return (pred - label) * grad
 end
 
-# Network
-struct ConvNet
+mutable struct DenseLayer
+    in_channels::Int64
+    out_channels::Int64
+    weights::Array
+    activation::Function
+    make_flat::Bool
+end
+
+function DenseLayer(in_channels::Int64, out_channels::Int64, activation::Function=nothing, make_flat::Bool=false)
+    weights = -0.2 .+ (0.2 - (-0.2)) .* randn(Float32, out_channels, in_channels)
+    return DenseLayer(in_channels, out_channels, weights, activation, make_flat)
+end
+
+mutable struct ConvLayer
+    in_channels::Int64
+    out_channels::Int64
+    weights::Array
+    kernel_size::Int64
+    activation::Function
+end
+
+function ConvLayer(in_channels::Int64, out_channels::Int64, kernel_size::Int64, activation::Function=nothing)
+    weights = -0.2 .+ (0.2 - (-0.2)) .* randn(Float64, kernel_size, kernel_size, in_channels, out_channels)
+    return ConvLayer(in_channels, out_channels, weights, kernel_size, activation)
+end
+
+struct LeNet5
     conv1::ConvLayer
     conv2::ConvLayer
     fc1::DenseLayer
     fc2::DenseLayer
     fc3::DenseLayer
-    sequence::Array{Function}
-end
-function create_net()
-    conv1 = conv_layer(1, 6, 5, relu)
-    conv2 = conv_layer(6, 16, 5, relu)
-    fc1 = dense_layer(16*5*5, 120, relu, true)
-    fc2 = dense_layer(120, 84, relu)
-    fc3 = dense_layer(84, 10, relu)
-    sequence = [conv, conv, Iterators.flatten, fully_connect, fully_connect, fully_connect]
-    return ConvNet(conv1, conv2, fc1, fc2, fc3, sequence)
 end
 
+function intialize_network()
+    conv1 = ConvLayer(1, 6, 5, relu)
+    conv2 = ConvLayer(6, 16, 5, relu)
+    fc1 = DenseLayer(16*5*5, 120, relu, true)
+    fc2 = DenseLayer(120, 84, relu)
+    fc3 = DenseLayer(84, 10, softmax)  
+    # Unlike in reference_solution.py, here the softmax function is done at the end of third dense layer instead of 
+    # at the beginning of cross entropy loss calculation, operation wise it should make no difference 
+    return LeNet5(conv1, conv2, fc1, fc2, fc3)
+end
+
+
 using MLDatasets, Images, ImageMagick, Shuffle
-    
 function load_train_data(shape::Tuple=(32,32), batch_size::Int=64)
     images, labels = MNIST.traindata(Float64)
     resized_images = []
@@ -165,7 +296,6 @@ function load_train_data(shape::Tuple=(32,32), batch_size::Int=64)
 
     return batches
 end
-    
     
 function load_test_data(shape::Tuple=(32,32), batch_size::Int=64)
     images, labels = MNIST.testdata(Float64)
@@ -191,323 +321,28 @@ function load_test_data(shape::Tuple=(32,32), batch_size::Int=64)
     return batches
 end
 
-
-function infer(model::ConvNet, input::Union{Matrix,Vector})
-    output =[]
-    push!(output,input)
-    for layer in fieldnames(typeof(model))
-        if isa(getfield(net,layer), ConvLayer)
-            field = getfield(net,layer)
-            println(size(field.weights))
-            new_output = []
-                for kernel_set in 1:field.out_channels
-                    step_output = []
-                    for in_image in 1:field.in_channels
-                        if step_output == []
-                        step_output = pooling(field.activation(conv(output[in_image],field.weights[:,:,in_image,kernel_set])),2)
-                        else
-                        step_output .+ pooling(field.activation(conv(output[in_image],field.weights[:,:,in_image,kernel_set])),2)
-                        end
-                    end
-                    push!(new_output,step_output)
-                end
+train_data = load_train_data()
+u = train_data[1][1][1]
+net = intialize_network()
+o = forward(net, u)
 
 
-            output = new_output
-        end
-                
-        if isa(getfield(model,layer), DenseLayer)
-            field = getfield(model,layer)
-            if field.make_flat == true
-                output = transpose(collect(Iterators.flatten((output))))
-            end
-            output = output * field.weights  # todo MAKE FC FUNCTION DO THAT, DON"T FORGET ABOUT ACTIVATION FUNCTION
-        end
-    end
-    return output
+function forward(net::LeNet5, input::Union{Matrix{Float64},Vector})
+    forward_results = []
+    x = convolution(input, net.conv1.weights); push!(forward_results,x)
+    x = net.conv1.activation(x); push!(forward_results,x)    
+    x = pooling(x); push!(forward_results,x)
+    x = convolution(x, net.conv2.weights); push!(forward_results,x)
+    x = net.conv2.activation(x); push!(forward_results,x)
+    x = pooling(x); push!(forward_results,x)
+    x = collect(Iterators.flatten(x))
+    x = fully_connected(x, net.fc1.weights); push!(forward_results,x)
+    x = net.fc1.activation(x); push!(forward_results,x)
+    x = fully_connected(x, net.fc2.weights); push!(forward_results,x)
+    x = net.fc2.activation(x); push!(forward_results,x)
+    x = fully_connected(x, net.fc3.weights); push!(forward_results,x)
+    x = net.fc3.activation(x); push!(forward_results,x)
+    return forward_results
 end
-                             
-    
-function training(num_of_epochs::Int, model::ConvNet, training_data, training_labels, criterion::Function, optimizer::Function)
-    for epoch in 1:num_of_epochs
-        for training_batch in training_data
-            image = training_batch[1][1]
-            label = training_batch[1][2]
-            
-            outputs = infer(model,image)
-            loss = criterion(outputs, label)
-        end
-    end
-end
-
-
-      
-
-
-net = create_net()
-learning_rate = 0.016
-num_of_epochs = 10
-        
-train_loader = load_train_data()
-u = train_loader[1][1][1]
-criterion = cross_entropy_loss
-pred = infer(net,u)
-pred = softmax(pred)
-d = train_loader[1][2][1]
-cross_entropy_loss(pred,d)
-
-
-# Dummy function
-function infer(model::ConvNet, input::Union{Matrix,Vector})
-    final_output = []
-    for i in 1:size(input)[1]
-        image_output = input[i]
-        for layer in fieldnames(typeof(model))
-            if isa(getfield(model,layer), ConvLayer)
-                field = getfield(model,layer)
-                new_image_output = []
-                for kernel_set in 1:field.out_channels
-                    step_output = []
-                    for in_image in 1:field.in_channels
-                        if step_output == []
-                        step_output = pooling(field.activation(conv(image_output[in_image],field.weights[:,:,in_image,kernel_set])),2)
-                        else
-                        step_output .+ pooling(field.activation(conv(image_output[in_image],field.weights[:,:,in_image,kernel_set])),2)
-                    end
-                    push!(new_output,step_output)
-                end
-
-                image_output = new_output
-            end
-
-            if isa(getfield(model,layer), DenseLayer)
-                field = getfield(model,layer)
-                if field.make_flat == true
-                    image_output = collect(Iterators.flatten((output)))
-                end
-                new_output = []
-                for out_neuron in 1:field.out_channels
-                    push!(new_output, fully_connect(image_output, field.weights[:,out_neuron], field.activation))      
-                end
-
-                image_output = new_output
-            end
-        end
-        ret
-end
-
-using Plots
-
-"""
-    display_image(image::Array{Float64,2})
-Display a 2D array as an image.
-
-# Arguments
-- `image::Array{Float64,2}`: The 2D array representing the image.
-
-"""
-function display_image(image::Array{Float64,2})
-    plot(
-        heatmap(image,
-                aspect_ratio=:equal,
-                frame=:none,
-                c=:grays,
-                colorbar=false,
-                legend=false),
-        ticks=nothing,
-        border=:none,
-        axis=:off
-    )
-end
-
-
-abstract type GraphNode end
-abstract type Operator <: GraphNode end
-
-struct Constant{T} <: GraphNode
-    output :: T
-end
-
-mutable struct Variable <: GraphNode
-    output :: Any
-    gradient :: Any
-    name :: String
-    Variable(output; name="?") = new(output, nothing, name)
-end
-
-mutable struct ScalarOperator{F} <: Operator
-    inputs :: Any
-    output :: Any
-    gradient :: Any
-    name :: String
-    ScalarOperator(fun, inputs...; name="?") = new{typeof(fun)}(inputs, nothing, nothing, name)
-end
-
-mutable struct BroadcastedOperator{F} <: Operator
-    inputs :: Any
-    output :: Any
-    gradient :: Any
-    name :: String
-    BroadcastedOperator(fun, inputs...; name="?") = new{typeof(fun)}(inputs, nothing, nothing, name)
-end
-
-# Graph building
-
-function visit(node::GraphNode, visited, order)
-    if node ∈ visited
-    else
-        push!(visited, node)
-        push!(order, node)
-    end
-    return nothing
-end
-
-function visit(node::Operator, visited, order)
-    if node ∈ visited
-    else
-        push!(visited, node)
-        for input in node.inputs
-            visit(input, visited, order)
-        end
-        push!(order, node)
-    end
-    return nothing
-end
-
-function topological_sort(head::GraphNode)
-    visited = Set()
-    order = Vector()
-    visit(head, visited, order)
-    return order
-end
-
-# Forward and Backward pass
-reset!(node::Constant) = nothing
-reset!(node::Variable) = node.gradient = nothing
-reset!(node::Operator) = node.gradient = nothing
-
-compute!(node::Constant) = nothing
-compute!(node::Variable) = nothing
-compute!(node::Operator) =
-    node.output = forward(node, [input.output for input in node.inputs]...)
-
-
-function forward!(order::Vector)
-    for node in order
-        compute!(node)
-        reset!(node)
-    end
-    return last(order).output
-end
-
-update!(node::Constant, gradient) = nothing
-update!(node::GraphNode, gradient) = if isnothing(node.gradient)
-    node.gradient = gradient else node.gradient .+= gradient
-end
-
-function backward!(order::Vector; seed=1.0)
-    result = last(order)
-    result.gradient = seed
-    @assert length(result.output) == 1 "Gradient is defined only for scalar functions"
-    for node in reverse(order)
-        backward!(node)
-    end
-    return nothing
-end
-
-function backward!(node::Constant) end
-function backward!(node::Variable) end
-function backward!(node::Operator)
-    inputs = node.inputs
-    gradients = backward(node, [input.output for input in inputs]..., node.gradient)
-    for (input, gradient) in zip(inputs, gradients)
-        update!(input, gradient)
-    end
-    return nothing
-end
-
-# Scalar
-
-import Base: ^, sin, *, sum, max, maximum
-import LinearAlgebra: mul!
-^(x::GraphNode, n::GraphNode) = ScalarOperator(^, x, n)
-forward(::ScalarOperator{typeof(^)}, x, n) = return x^n
-backward(::ScalarOperator{typeof(^)}, x, n, g) = tuple(g * n * x ^ (n-1), g * log(abs(x)) * x ^ n)
-
-sin(x::GraphNode) = ScalarOperator(sin, x)
-forward(::ScalarOperator{typeof(sin)}, x) = return sin(x)
-backward(::ScalarOperator{typeof(sin)}, x, g) = tuple(g * cos(x))
-
-# Broadcasted
-
-# x * y (aka matrix multiplication)
-*(A::GraphNode, x::GraphNode) = BroadcastedOperator(mul!, A, x)
-forward(::BroadcastedOperator{typeof(mul!)}, A, x) = return A * x
-backward(::BroadcastedOperator{typeof(mul!)}, A, x, g) = tuple(g * x', A' * g)
-
-# x .* y (element-wise multiplication)
-Base.Broadcast.broadcasted(*, x::GraphNode, y::GraphNode) = BroadcastedOperator(*, x, y)
-forward(::BroadcastedOperator{typeof(*)}, x, y) = return x .* y
-backward(node::BroadcastedOperator{typeof(*)}, x, y, g) = let
-    𝟏 = ones(length(node.output))
-    Jx = diagm(y .* 𝟏)
-    Jy = diagm(x .* 𝟏)
-    tuple(Jx' * g, Jy' * g)
-end
-
-Base.Broadcast.broadcasted(-, x::GraphNode, y::GraphNode) = BroadcastedOperator(-, x, y)
-forward(::BroadcastedOperator{typeof(-)}, x, y) = return x .- y
-backward(::BroadcastedOperator{typeof(-)}, x, y, g) = tuple(g,-g)
-
-Base.Broadcast.broadcasted(+, x::GraphNode, y::GraphNode) = BroadcastedOperator(+, x, y)
-forward(::BroadcastedOperator{typeof(+)}, x, y) = return x .+ y
-backward(::BroadcastedOperator{typeof(+)}, x, y, g) = tuple(g, g)
-
-sum(x::GraphNode) = BroadcastedOperator(sum, x)
-forward(::BroadcastedOperator{typeof(sum)}, x) = return sum(x)
-backward(::BroadcastedOperator{typeof(sum)}, x, g) = let
-    𝟏 = ones(length(x))
-    J = 𝟏'
-    tuple(J' * g)
-end
-
-Base.Broadcast.broadcasted(/, x::GraphNode, y::GraphNode) = BroadcastedOperator(/, x, y)
-forward(::BroadcastedOperator{typeof(/)}, x, y) = return x ./ y
-backward(node::BroadcastedOperator{typeof(/)}, x, y::Real, g) = let
-    𝟏 = ones(length(node.output))
-    Jx = diagm(𝟏 ./ y)
-    Jy = (-x ./ y .^2)
-    tuple(Jx' * g, Jy' * g)
-end
-
-Base.Broadcast.broadcasted(max, x::GraphNode, y::GraphNode) = BroadcastedOperator(max, x, y)
-forward(::BroadcastedOperator{typeof(max)}, x, y) = return max.(x, y)
-backward(::BroadcastedOperator{typeof(max)}, x, y, g) = let
-    Jx = diagm(isless.(y, x))
-    Jy = diagm(isless.(x, y))
-    tuple(Jx' * g, Jy' * g)
-end
-
-# Base.Broadcast.broadcasted(maximum, x::GraphNode) = BroadcatedOperator(maximum,x)
-# forward(::BroadcastedOperator{typeof(maximum)}, x) = return maximum(x)
-# backward(::BroadcastedOperator{typeof(maximum)},x, g) = 
-
-x = Variable(randn(1,400),name="x")
-y = Variable(randn(1,10),name="y")
-w1 = Variable(net.conv1.weights, name="w1")
-w2 = Variable(net.conv2.weights, name="w2")
-w3 = Variable(net.fc1.weights, name="w3")
-w4 = Variable(net.fc2.weights, name="w4")
-w5 = Variable(net.fc3.weights, name="w5")
-function testing_net()
-    x1 = relu(x*w3)
-    x2 = relu(x1*w4)
-    x3 = x2*w5
-    x4 = softmax(x3)
-    x5 = cross_entropy_loss(x4,y)
-    return topological_sort(loss)
-end
-graph = testing_net()
-
 
 
