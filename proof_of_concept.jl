@@ -1,102 +1,3 @@
-using Random
-
-# Define sigmoid function
-sigmoid(x) = 1 / (1 + exp(-x))
-
-# Define model architecture
-struct Model
-    w1::Matrix{Float64}
-    b1::Vector{Float64}
-    w2::Matrix{Float64}
-    b2::Vector{Float64}
-end
-
-# Define forward pass through the model
-function forward(model::Model, x::Vector{Float64})
-    a1 = model.w1 * x .+ model.b1
-    h1 = sigmoid.(a1)
-    a2 = model.w2 * h1 .+ model.b2
-    y = softmax(a2)
-    return a1, h1, a2, y
-end
-
-# Define cross-entropy loss function
-function cross_entropy_loss(y_pred, y_true)
-    -sum(y_true .* log.(y_pred))
-end
-
-# Define function to calculate gradients with automatic differentiation using a graph
-function backward(model::Model, x::Vector{Float64}, y_true::Vector{Float64})
-    # Forward pass
-    a1, h1, a2, y_pred = forward(model, x)
-
-    # Compute loss
-    loss = cross_entropy_loss(y_pred, y_true)
-
-    # Initialize gradients
-    grad_w1 = zeros(size(model.w1))
-    grad_b1 = zeros(size(model.b1))
-    grad_w2 = zeros(size(model.w2))
-    grad_b2 = zeros(size(model.b2))
-
-    # Backward pass
-    graph = [a1, h1, a2, y_pred]
-    gradients = [nothing, nothing, nothing, y_pred - y_true]
-
-    # Backpropagate through each layer
-    for i = 3:-1:1
-        grad = gradients[i + 1]
-        input = graph[i]
-
-        # Compute gradients of weights and biases
-        grad_w = grad * transpose(graph[i - 1])
-        grad_b = grad
-
-        # Update gradients
-        gradients[i] = transpose(model.w[i]) * grad
-        if i == 3
-            gradients[i] .= gradients[i] .* softmax_gradient(a2)
-        else
-            gradients[i] .= gradients[i] .* sigmoid_gradient(input)
-        end
-        grad_w .= grad_w / size(x, 2)
-        grad_b .= mean(grad_b, dims=2)
-
-        # Update model parameters
-        model.w[i] -= learning_rate * grad_w
-        model.b[i] -= learning_rate * grad_b
-    end
-
-    return loss, model
-end
-
-# Define sigmoid gradient function
-function sigmoid_gradient(x)
-    s = sigmoid.(x)
-    s .* (1 .- s)
-end
-
-# Define softmax function
-function softmax(x)
-    exp.(x) ./ sum(exp.(x))
-end
-
-# Define softmax gradient function
-function softmax_gradient(x)
-    s = softmax(x)
-    s .* (1 .- s)
-end
-
-# Generate random training data
-Random.seed!(123)
-x_train = rand(2, 1000) .* 2 .- 1
-y_train = (sum(x_train, dims=1) .> 0) .+ 1
-
-# Initialize model
-learning_rate = 0.1
-model = Model(randn(4, 2), randn(4), randn(2, 4), randn(2))
-
-
 using LinearAlgebra
 
 function convolution(input::Matrix{Float64}, kernel, activation=nothing)
@@ -409,6 +310,7 @@ end
 
 
 using MLDatasets, Images, ImageMagick, Shuffle
+
 function load_train_data(shape::Tuple=(32,32), batch_size::Int=64)
     images, labels = MNIST.traindata(Float64)
     resized_images = []
@@ -456,67 +358,6 @@ function load_test_data(shape::Tuple=(32,32), batch_size::Int=64)
     
     return batches
 end
-#train_data = load_train_data()
-# train_data[1]
-
-# train_data = load_train_data()
-
-# u = train_data[1][1][1]
-# net = intialize_network()
-# o = forward(net, u)
-# loss = cross_entropy_loss(last(o), 1)
-
-#     x = fully_connected(x, net.fc2.weights); push!(forward_results,x)
-#     x = net.fc2.activation(x); push!(forward_results,x)
-# x = convolution(u, net.conv1.weights)
-# x = net.conv1.activation(x)  
-# x = pooling(x)
-# size(u,3)
-
-fc1 = DenseLayer(400, 120, softmax)
-fc2 = DenseLayer(120, 84, softmax)
-fc3 = DenseLayer(84, 10, softmax)
-conv2 = ConvLayer(6, 16, 5, relu)
-conv1 = ConvLayer(1, 6, 5, relu)
-input3 = randn(400)
-input = u
-input2 = randn(120)
-x5 = convolution(input,conv1.weights)
-y5 = relu(x5)
-z5 = pooling(y5)
-x4 = convolution(z5,conv2.weights)
-y4 = relu(x4)
-z4 = pooling(y4) 
-z4f = collect(Iterators.flatten(z4))
-x3 = fully_connected(z4f, fc1.weights)
-y3 = relu(x3)
-x2 = fully_connected(y3, fc2.weights)
-y2 = relu(x2)
-x = fully_connected(y2, fc3.weights) 
-y = softmax(x)
-l = cross_entropy_loss(y, 1)
-num_of_classes = size(y,1)
-label = int_to_array(1, num_of_classes)
-# y - label' 
-l1 = cross_entropy_loss_backwards(y, 1)
-y1 = softmax_backwards(y) * l1
-
-dx, dw = fully_connected_backwards(y2,fc3.weights,y1)
-y2
-dr = relu_backwards(y2) .* dx
-dx1, dw1 = fully_connected_backwards(y3,fc2.weights,dr)
-dr1 = relu_backwards(y3) .* dx1 
-dx2, dw2 = fully_connected_backwards(z4f,fc1.weights,dr1)
-dr2 = relu_backwards(dx2) .* dx2
-re = reshape(dr2,5,5,16)
-dm1 = pooling_backwards(y4, z4, re) 
-dr3 = relu_backwards(dm1) .* dm1
-dconv2, dcw2 = convolution_backwards(z5,conv2.weights,dr3)
-dm2 = pooling_backwards(y5, z5, dconv2) 
-dr4 = relu_backwards(dm2) .* dm2
-length(size(conv1.weights))
-dconv3, dcw3 = convolution_backwards(input,conv1.weights,dr4)
-dcw3
 
 
 function forward(net::LeNet5, input::Union{Matrix{Float64},Vector})
@@ -537,7 +378,7 @@ function forward(net::LeNet5, input::Union{Matrix{Float64},Vector})
     return forward_results
 end
 
-function backward(model::LeNet5, preds::Vector, loss::Number, dest::Int64, learning_rate::Float64=0.016)
+function backward(model::LeNet5, image::Array, preds::Vector, loss::Number, dest::Int64, learning_rate::Float64=0.016)
     
     # zero grad
     grad_c1 = zeros(size(model.conv1.weights))
@@ -553,10 +394,8 @@ function backward(model::LeNet5, preds::Vector, loss::Number, dest::Int64, learn
     sequence = ["conv1", net.conv1.activation,pooling,"conv2",net.conv2.activation,pooling,"deflatten","fc1",net.fc1.activation,"fc2",net.fc2.activation,"fc3",net.fc3.activation]
     # Backpropagate through each layer
     for i = length(graph):-1:1
-            println(sequence[i])
         # grad = gradients[i + 1]
         input = graph[i]
-        
         if sequence[i] == softmax
             curr_grad = softmax_backwards(curr_grad) * curr_grad
         elseif sequence[i] == relu
@@ -564,33 +403,33 @@ function backward(model::LeNet5, preds::Vector, loss::Number, dest::Int64, learn
         elseif sequence[i] == pooling
             curr_grad = pooling_backwards(graph[i-1],graph[i],curr_grad)
         elseif sequence[i] == "fc3"
-            curr_grad, grad_fc3 = fully_connected_backwards(input,model.fc3.weights,curr_grad)
+            curr_grad, grad_fc3 = fully_connected_backwards(graph[i-2],model.fc3.weights,curr_grad)
         elseif sequence[i] == "fc2"
-            curr_grad, grad_fc2 = fully_connected_backwards(input,model.fc2.weights,curr_grad)
+            curr_grad, grad_fc2 = fully_connected_backwards(graph[i-2],model.fc2.weights,curr_grad)
         elseif sequence[i] == "fc1"
-            curr_grad, grad_fc1 = fully_connected_backwards(input,model.fc1.weights,curr_grad)
+            curr_grad, grad_fc1 = fully_connected_backwards(collect(Iterators.flatten(graph[i-2])),model.fc1.weights,curr_grad)
         elseif sequence[i] == "conv2"
-            curr_grad, grad_c2 = convolution_backwards(input,conv2.weights,curr_grad)
+            curr_grad, grad_c2 = convolution_backwards(graph[i-1],model.conv2.weights,curr_grad)
         elseif sequence[i] == "conv1"
-            println(size(input), size(conv1.weights), size(curr_grad))
-            curr_grad, grad_c1 = convolution_backwards(input,conv1.weights,curr_grad)
+            curr_grad, grad_c1 = convolution_backwards(image,model.conv1.weights,curr_grad)
         elseif sequence[i] == "deflatten"
             curr_grad = reshape(curr_grad,5,5,16)
         end
     end
     
     # Update model parameters
-    print(size(grad_c2), size(model.conv2.weights))
-    model.conv1.weights -= learning_rate .* grad_c1
-    model.conv2.weights -= learning_rate .* grad_c2
+    model.conv1.weights[:,:,1,:] -= learning_rate .* grad_c1
+    for i in 1:6
+    model.conv2.weights[:,:,i,:] -= learning_rate .* grad_c2
+    end
     model.fc1.weights -= learning_rate .* grad_fc1
     model.fc2.weights -= learning_rate .* grad_fc2
     model.fc3.weights -= learning_rate .* grad_fc3
-
     return loss, model
 end
 
 function training(model::LeNet5, train_data::Vector, criterion::Function, optimizer::Function, num_of_epochs::Int64=10, batch_size::Int64=64)
+    # TO BE IMPLEMENTED
     num_of_steps = length(train_loader)
     for epoch in 1:num_of_epochs
         for batch in 1:num_of_steps
@@ -604,15 +443,26 @@ function training(model::LeNet5, train_data::Vector, criterion::Function, optimi
         end
        
     end
+    end
 
 
+# Forward and backward inference example
 train_data = load_train_data()
-  
+net = intialize_network()
+
 u = train_data[1][1][1]
 dest = train_data[1][2][1]
-net = intialize_network()
 preds = forward(net, u)
 loss = cross_entropy_loss(last(preds), 1)
-loss, model = backward(net,preds,loss,dest) 
+loss, net = backward(net,u,preds,loss,dest) 
+println(loss)
+
+u = train_data[1][1][2]
+dest = train_data[1][2][2]
+preds = forward(net, u)
+loss = cross_entropy_loss(last(preds), 1)
+loss, net = backward(net,u,preds,loss,dest) 
+print(loss)
+
 
 
