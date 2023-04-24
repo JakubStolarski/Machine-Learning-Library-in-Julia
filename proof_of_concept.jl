@@ -378,7 +378,7 @@ function forward(net::LeNet5, input::Union{Matrix{Float64},Vector})
     return forward_results
 end
 
-function backward(model::LeNet5, image::Array, preds::Vector, loss::Number, dest::Int64, learning_rate::Float64=0.016)
+function backward(model::LeNet5, image::Array, preds::Vector, loss::Number, dest::Int64, learning_rate::Float64=0.16)
     
     # zero grad
     grad_c1 = zeros(size(model.conv1.weights))
@@ -394,7 +394,7 @@ function backward(model::LeNet5, image::Array, preds::Vector, loss::Number, dest
     sequence = ["conv1", net.conv1.activation,pooling,"conv2",net.conv2.activation,pooling,"deflatten","fc1",net.fc1.activation,"fc2",net.fc2.activation,"fc3",net.fc3.activation]
     # Backpropagate through each layer
     for i = length(graph):-1:1
-        # grad = gradients[i + 1]
+        println(sequence[i])
         input = graph[i]
         if sequence[i] == softmax
             curr_grad = softmax_backwards(curr_grad) * curr_grad
@@ -428,19 +428,24 @@ function backward(model::LeNet5, image::Array, preds::Vector, loss::Number, dest
     return loss, model
 end
 
-function training(model::LeNet5, train_data::Vector, criterion::Function, optimizer::Function, num_of_epochs::Int64=10, batch_size::Int64=64)
-    # TO BE IMPLEMENTED
-    num_of_steps = length(train_loader)
+function training(model::LeNet5, train_data::Vector, criterion::Function, num_of_epochs::Int64=10, batch_size::Int64=64)
+    num_of_steps = length(train_data)
     for epoch in 1:num_of_epochs
         for batch in 1:num_of_steps
             images = train_data[batch][1]
             labels = train_data[batch][2]
-            loss = []
+            gradients = []
+            i = 1
             for(image,label) in zip(images,labels)
                 outputs = forward(model, image)
-                push!(loss, criterion(last(outputs), label))
+                loss = criterion(last(outputs), label)
+                loss, model = backward(model, image, outputs, loss, label)
+                # push!(loss, criterion(last(outputs), label))
+                i = i + 1
+                println("loss:", loss, "num:", i)
             end
         end
+        
        
     end
     end
@@ -453,9 +458,10 @@ net = intialize_network()
 u = train_data[1][1][1]
 dest = train_data[1][2][1]
 preds = forward(net, u)
+last(preds)
 loss = cross_entropy_loss(last(preds), 1)
 loss, net = backward(net,u,preds,loss,dest) 
-println(loss)
+# println(loss)
 
 u = train_data[1][1][2]
 dest = train_data[1][2][2]
@@ -464,5 +470,104 @@ loss = cross_entropy_loss(last(preds), 1)
 loss, net = backward(net,u,preds,loss,dest) 
 print(loss)
 
+
+# training(net,train_data,cross_entropy_loss)
+train_data = load_train_data()
+net = intialize_network()
+for i in 1:937
+    for j in 1:64
+        image = train_data[i][1][j]
+        label = train_data[i][2][j]
+        outputs = forward(net, image)
+        loss = cross_entropy_loss(last(outputs), label)
+        a = net.conv1.weights
+        loss, net = backward(net, image, outputs, loss, label)
+    end
+    println(loss, " ", i)
+end
+
+
+train_data = load_train_data()
+
+u = train_data[1][1][2]
+net = intialize_network()
+# o = forward(net, u)
+# loss = cross_entropy_loss(last(o), 1)
+
+#     x = fully_connected(x, net.fc2.weights); push!(forward_results,x)
+#     x = net.fc2.activation(x); push!(forward_results,x)
+# x = convolution(u, net.conv1.weights)
+# x = net.conv1.activation(x)  
+# x = pooling(x)
+# size(u,3)
+
+fc1 = DenseLayer(400, 120, softmax)
+fc2 = DenseLayer(120, 84, softmax)
+fc3 = DenseLayer(84, 10, softmax)
+conv2 = ConvLayer(6, 16, 5, relu)
+conv1 = ConvLayer(1, 6, 5, relu)
+input = u
+length(size(conv1.weights))
+# x5 = convolution(input,conv1.weights)
+# display_image(x5[:, :, 5])
+
+# y5 = relu(x5)
+# z5 = pooling(y5)
+# x4 = convolution(z5,conv2.weights)
+# y4 = relu(x4)
+# z4 = pooling(y4) 
+# z4f = collect(Iterators.flatten(z4))
+# x3 = fully_connected(z4f, fc1.weights)
+# y3 = relu(x3)
+# x2 = fully_connected(y3, fc2.weights)
+# y2 = relu(x2)
+# x = fully_connected(y2, fc3.weights) 
+# y = softmax(x)
+# l = cross_entropy_loss(y, 1)
+# num_of_classes = size(y,1)
+# label = int_to_array(1, num_of_classes)
+# # y - label' 
+# l1 = cross_entropy_loss_backwards(y, 1)
+# y1 = softmax_backwards(y) * l1
+
+# dx, dw = fully_connected_backwards(y2,fc3.weights,y1)
+# y2
+# dr = relu_backwards(y2) .* dx
+# dx1, dw1 = fully_connected_backwards(y3,fc2.weights,dr)
+# dr1 = relu_backwards(y3) .* dx1 
+# dx2, dw2 = fully_connected_backwards(z4f,fc1.weights,dr1)
+# dr2 = relu_backwards(dx2) .* dx2
+# re = reshape(dr2,5,5,16)
+# dm1 = pooling_backwards(y4, z4, re) 
+# dr3 = relu_backwards(dm1) .* dm1
+# dconv2, dcw2 = convolution_backwards(z5,conv2.weights,dr3)
+# dm2 = pooling_backwards(y5, z5, dconv2) 
+# dr4 = relu_backwards(dm2) .* dm2
+# dconv3, dcw3 = convolution_backwards(input,conv1.weights,dr4)
+# y2
+
+using Plots
+
+"""
+    display_image(image::Array{Float64,2})
+Display a 2D array as an image.
+
+# Arguments
+- `image::Array{Float64,2}`: The 2D array representing the image.
+
+"""
+function display_image(image::Array{Float64,2})
+    plot(
+        heatmap(image,
+                aspect_ratio=:equal,
+                frame=:none,
+                c=:grays,
+                colorbar=false,
+                legend=false),
+        ticks=nothing,
+        border=:none,
+        axis=:off
+    )
+end
 
 
