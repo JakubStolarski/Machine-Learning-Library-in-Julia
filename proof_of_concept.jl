@@ -8,8 +8,8 @@ function convolution(input::Matrix{Float64}, kernel, activation=nothing)
         output_width = input_width - kernel_width + 1
         output = zeros(output_height, output_width, out_channels)
 
-        for in_channel in in_channels
-            for out_channel in out_channels
+        for in_channel in 1:in_channels
+            for out_channel in 1:out_channels
                 for i in 1:output_height
                     for j in 1:output_width
                         for k in 1:kernel_height
@@ -27,7 +27,7 @@ function convolution(input::Matrix{Float64}, kernel, activation=nothing)
         output_width = input_width - kernel_width + 1
         output = zeros(output_height, output_width, out_channels)
     
-                for out_channel in out_channels
+                for out_channel in 1:out_channels
                     for i in 1:output_height
                         for j in 1:output_width
                             for k in 1:kernel_height
@@ -70,9 +70,9 @@ function convolution(input::Array{Float64}, kernel, activation=nothing)
         output_width = input_width - kernel_width + 1
         output = zeros(output_height, output_width, out_channels)
 
-        for input_channel in input_channels
-            for in_channel in in_channels
-                for out_channel in out_channels
+        for input_channel in 1:input_channels
+            for in_channel in 1:in_channels
+                for out_channel in 1:out_channels
                     for i in 1:output_height
                         for j in 1:output_width
                             for k in 1:kernel_height
@@ -91,9 +91,9 @@ function convolution(input::Array{Float64}, kernel, activation=nothing)
         output_width = input_width - kernel_width + 1
         output = zeros(output_height, output_width, out_channels)
 
-        for input_channel in input_channels
+        for input_channel in 1:input_channels
             
-                for out_channel in out_channels
+                for out_channel in 1:out_channels
                     for i in 1:output_height
                         for j in 1:output_width
                             for k in 1:kernel_height
@@ -115,10 +115,10 @@ function convolution(input::Array{Float64}, kernel, activation=nothing)
 end
 
 function convolution_backwards(input::Array{Float64}, kernel::Array{Float64}, grad::Array{Float64})
-    dw = convolution(input,grad)
+    dw = convolution(grad,input)
     pad = size(input,1) - size(grad,1)
     grad_pad = zero_padding(grad, pad)
-    dx = convolution(grad_pad, kernel)
+    dx = convolution(grad_pad, rot180(kernel))
     return dx, dw
 end
     
@@ -150,7 +150,7 @@ function relu_backwards(x::Union{Matrix, Vector, Array, Int, Transpose{Float64, 
 end
 
 function softmax(x::Union{Matrix, Vector, Array, Int, LinearAlgebra.Transpose{Float64, Vector{Float64}}}) 
-    exp_x = exp.(x)
+    exp_x = exp.(x) 
     return exp_x ./ sum(exp_x)
 end
 
@@ -186,12 +186,12 @@ function pooling(x::Union{Matrix, Vector, Array, Int}, kernel::Int=2, stride::In
     output_shape = trunc(Int, output_shape)
     output = zeros((output_shape, output_shape, channels))
     for channel in 1:channels
-        for i in 1:output_shape
-            for j in 1:output_shape
+        for i in 1:stride:size(x,1)
+            for j in 1:stride:size(x,2)
                 if pool_type == "max"
-                    output[i, j, channel] = maximum(x[i:i+stride,j:j+stride, channel])
+                    output[fld(i,stride)+1, fld(j,stride)+1, channel] = maximum(x[i:i+kernel-1,j:j+kernel-1,channel])
                 elseif pool_type == "mean"
-                    output[i, j, channel] = mean(x[i:i+stride,j:j+stride, channel])
+                    output[i/stride + 1, j/stride + 1, channel] = mean(x[i:i+kernel-1,j:j+kernel-1, channel])
                 end
             end
         end
@@ -204,16 +204,12 @@ function pooling_backwards(x::Union{Matrix, Vector, Array, Int}, output::Union{M
      output_shape = size(x,1)
      pool_grad = zeros(size(x))
      output_flat = vec(output)
+     kernel = stride = 2
      for channel in 1:channels
-        for (i, local_max) in enumerate(output_flat)
-            if i < 10
-                for j in i:i+1
-                    for k in i:i+1
-                        if x[j, k, channel] == local_max
-                            pool_grad[j, k, channel] = grad[i]
-                        end
-                    end
-                end
+        for i in 1:stride:size(x,1)
+            for j in 1:stride:size(x,2)
+                local_max, max_location = findmax(x[i:i+kernel-1,j:j+kernel-1, channel])
+                pool_grad[max_location[1]+i-1,max_location[2]+j-1,channel] = grad[fld(i,stride)+1,fld(j,stride)+1,channel]
             end
         end
     end
@@ -253,7 +249,8 @@ end
 function cross_entropy_loss(pred::Vector{Float64}, dest::Int64)
     num_of_classes = size(pred,1)
     label = int_to_array(dest, num_of_classes)
-    loss = -sum((label .* log.(pred)))/num_of_classes
+    for i in 1:length(pred) if pred[i]==0 pred[i] += 1e-7 end end
+    loss = -sum((label * log.(pred)))/num_of_classes
     return loss
 end
 
@@ -272,7 +269,8 @@ mutable struct DenseLayer
 end
 
 function DenseLayer(in_channels::Int64, out_channels::Int64, activation::Function=nothing, make_flat::Bool=false)
-    weights = -0.2 .+ (0.2 - (-0.2)) .* randn(Float32, out_channels, in_channels)
+    std_dev = sqrt(2/(in_channels*out_channels*out_channels))
+    weights = randn(Float32, out_channels, in_channels) .* std_dev 
     return DenseLayer(in_channels, out_channels, weights, activation, make_flat)
 end
 
@@ -285,7 +283,8 @@ mutable struct ConvLayer
 end
 
 function ConvLayer(in_channels::Int64, out_channels::Int64, kernel_size::Int64, activation::Function=nothing)
-    weights = -0.2 .+ (0.2 - (-0.2)) .* randn(Float64, kernel_size, kernel_size, in_channels, out_channels)
+    std_dev = sqrt(2/(in_channels*out_channels*out_channels))
+    weights = randn(Float64, kernel_size, kernel_size, in_channels, out_channels) .* std_dev 
     return ConvLayer(in_channels, out_channels, weights, kernel_size, activation)
 end
 
@@ -394,7 +393,6 @@ function backward(model::LeNet5, image::Array, preds::Vector, loss::Number, dest
     sequence = ["conv1", net.conv1.activation,pooling,"conv2",net.conv2.activation,pooling,"deflatten","fc1",net.fc1.activation,"fc2",net.fc2.activation,"fc3",net.fc3.activation]
     # Backpropagate through each layer
     for i = length(graph):-1:1
-        println(sequence[i])
         input = graph[i]
         if sequence[i] == softmax
             curr_grad = softmax_backwards(curr_grad) * curr_grad
@@ -431,6 +429,7 @@ end
 function training(model::LeNet5, train_data::Vector, criterion::Function, num_of_epochs::Int64=10, batch_size::Int64=64)
     num_of_steps = length(train_data)
     for epoch in 1:num_of_epochs
+        j = 1
         for batch in 1:num_of_steps
             images = train_data[batch][1]
             labels = train_data[batch][2]
@@ -444,6 +443,8 @@ function training(model::LeNet5, train_data::Vector, criterion::Function, num_of
                 i = i + 1
                 println("loss:", loss, "num:", i)
             end
+            println("Batch:", loss, "num:", j)
+            j = j+1
         end
         
        
@@ -455,21 +456,21 @@ function training(model::LeNet5, train_data::Vector, criterion::Function, num_of
 train_data = load_train_data()
 net = intialize_network()
 
-u = train_data[1][1][1]
-dest = train_data[1][2][1]
-preds = forward(net, u)
-last(preds)
-loss = cross_entropy_loss(last(preds), 1)
-loss, net = backward(net,u,preds,loss,dest) 
-# println(loss)
+# u = train_data[1][1][1]
+# dest = train_data[1][2][1]
+# preds = forward(net, u)
+# last(preds)
+# loss = cross_entropy_loss(last(preds), 1)
+# loss, net = backward(net,u,preds,loss,dest) 
+# # println(loss)
 
-u = train_data[1][1][2]
-dest = train_data[1][2][2]
-preds = forward(net, u)
-loss = cross_entropy_loss(last(preds), 1)
-loss, net = backward(net,u,preds,loss,dest) 
-print(loss)
-
+# @time u = train_data[1][1][2]
+# @time dest = train_data[1][2][2]
+# @time preds = forward(net, u)
+# @time loss = cross_entropy_loss(last(preds), 1)
+# @time loss, net = backward(net,u,preds,loss,dest) 
+# print(loss)
+@time training(net, train_data, cross_entropy_loss,1)
 
 # training(net,train_data,cross_entropy_loss)
 train_data = load_train_data()
@@ -482,15 +483,25 @@ for i in 1:937
         loss = cross_entropy_loss(last(outputs), label)
         a = net.conv1.weights
         loss, net = backward(net, image, outputs, loss, label)
+        println(output[13])
     end
+    
     println(loss, " ", i)
 end
 
 
-train_data = load_train_data()
+function convolution_backwards(input::Array{Float64}, kernel::Array{Float64}, grad::Array{Float64})
+    dw = convolution(grad,input)
+    pad = size(input,1) - size(grad,1)
+    grad_pad = zero_padding(grad, pad)
+    dx = convolution(grad_pad, rot180(kernel))
+    return dx, dw
+end
 
-u = train_data[1][1][2]
-net = intialize_network()
+# @time train_data = load_train_data()
+
+# @time u = train_data[1][1][2]
+#@time net = intialize_network()
 # o = forward(net, u)
 # loss = cross_entropy_loss(last(o), 1)
 
@@ -508,43 +519,86 @@ conv2 = ConvLayer(6, 16, 5, relu)
 conv1 = ConvLayer(1, 6, 5, relu)
 input = u
 length(size(conv1.weights))
-# x5 = convolution(input,conv1.weights)
-# display_image(x5[:, :, 5])
 
-# y5 = relu(x5)
-# z5 = pooling(y5)
-# x4 = convolution(z5,conv2.weights)
-# y4 = relu(x4)
-# z4 = pooling(y4) 
-# z4f = collect(Iterators.flatten(z4))
-# x3 = fully_connected(z4f, fc1.weights)
-# y3 = relu(x3)
-# x2 = fully_connected(y3, fc2.weights)
-# y2 = relu(x2)
-# x = fully_connected(y2, fc3.weights) 
-# y = softmax(x)
-# l = cross_entropy_loss(y, 1)
-# num_of_classes = size(y,1)
-# label = int_to_array(1, num_of_classes)
-# # y - label' 
-# l1 = cross_entropy_loss_backwards(y, 1)
-# y1 = softmax_backwards(y) * l1
+x5 = convolution(u,conv1.weights)
+y5 = relu(x5)
+z5 = pooling(y5)
 
-# dx, dw = fully_connected_backwards(y2,fc3.weights,y1)
-# y2
-# dr = relu_backwards(y2) .* dx
-# dx1, dw1 = fully_connected_backwards(y3,fc2.weights,dr)
-# dr1 = relu_backwards(y3) .* dx1 
-# dx2, dw2 = fully_connected_backwards(z4f,fc1.weights,dr1)
-# dr2 = relu_backwards(dx2) .* dx2
-# re = reshape(dr2,5,5,16)
-# dm1 = pooling_backwards(y4, z4, re) 
-# dr3 = relu_backwards(dm1) .* dm1
+x4 = convolution(z5,conv2.weights)
+y4 = relu(x4)
+z4 = pooling(y4)
+# # # display_image(z5[:,:,4])
+# # # @show z4f = collect(Iterators.flatten(z4))
+z4f = vec(z4)
+
+x3 = fully_connected(z4f, fc1.weights)
+y3 = relu(x3)
+
+x2 = fully_connected(y3, fc2.weights)
+y2 = relu(x2)
+
+x = fully_connected(y2, fc3.weights) 
+y = softmax(x)
+l = cross_entropy_loss(y, train_data[1][2][2])
+
+# # display_image(input)
+# # @show l = cross_entropy_loss(y, train_data[1][2][2])
+# # @show y
+# # @show label = int_to_array(train_data[1][2][2], 10)
+# # label * log.(y)
+
+
+# # num_of_classes = size(y,1)
+# # label = int_to_array(train_data[1][2][2], 10)
+# # # y - label' 
+# # y - label'
+l1 = cross_entropy_loss_backwards(y, train_data[1][2][2])
+y1 = softmax_backwards(y) * l1
+
+dx, dw = fully_connected_backwards(y2,fc3.weights,y1)
+# # # # y2
+dr = relu_backwards(y2) .* dx
+dx1, dw1 = fully_connected_backwards(y3,fc2.weights,dr)
+# # dw1
+dr1 = relu_backwards(y3) .* dx1 
+dx2, dw2 = fully_connected_backwards(z4f,fc1.weights,dr1)
+
+re = reshape(dx2,5,5,16)
+
+dm1 = pooling_backwards(y4, z4, re)
+# re
+# @show dm1[:,:,7]
+# @show re
+# @show display_image(dm1[:,:,7])
+# dm1[:,:,7]
+dr3 = relu_backwards(x4) .* dm1
+# pad = size(z5,1) - size(dr3,1)
+# grad_pad = zero_padding(dr3, pad)
+# dr3
+#dx = convolution(grad_pad, rot180(kernel))
 # dconv2, dcw2 = convolution_backwards(z5,conv2.weights,dr3)
+# # dcw2
+# convolution(rot180(z5),dr3)
+
+for i in 1:size(z5,3)
+    z5[:,:,i] = rot180(z5[:,:,i])
+end
+convolution(z5,dr3)
+for i in 1:size(conv2.weights,3)
+    for j in 1:size(conv2.weights,4)
+        conv2.weights[:,:,i,j] = rot180(conv2.weights[:,:,i,j])
+    end
+end
+convolution(z5,dr3)
+pad = size(z5,1) - size(dr3,1)
+grad_pad = zero_padding(dr3, pad)
+convolution(grad_pad, conv2.weights)
+#conv2.weights
 # dm2 = pooling_backwards(y5, z5, dconv2) 
 # dr4 = relu_backwards(dm2) .* dm2
 # dconv3, dcw3 = convolution_backwards(input,conv1.weights,dr4)
-# y2
+# dcw3
+# # y2
 
 using Plots
 
@@ -569,5 +623,52 @@ function display_image(image::Array{Float64,2})
         axis=:off
     )
 end
+
+function pooling_backwards(x::Union{Matrix, Vector, Array, Int}, output::Union{Matrix, Vector, Array, Int}, grad::Union{Matrix, Vector, Array, Int}, kernel::Int=2, stride::Int=kernel, pool_type::String="max")    
+     channels = size(x,3)
+     output_shape = size(x,1)
+     pool_grad = zeros(size(x))
+     output_flat = vec(output)
+     kernel = stride = 2
+     for channel in 1:channels
+        for i in 1:stride:size(x,1)
+            for j in 1:stride:size(x,2)
+                local_max, max_location = findmax(x[i:i+kernel-1,j:j+kernel-1, channel])
+                pool_grad[max_location[1]+i-1,max_location[2]+j-1,channel] = grad[fld(i,stride)+1,fld(j,stride)+1,channel]
+            end
+        end
+    end
+    return pool_grad     
+end
+
+function pooling(x::Union{Matrix, Vector, Array, Int}, kernel::Int=2, stride::Int=kernel, pool_type::String="max")
+    channels = size(x,3)
+    output_shape = (size(x,1) - kernel) / stride + 1
+    @show output_shape = trunc(Int, output_shape)
+    output = zeros((output_shape, output_shape, channels))
+    for channel in 1:channels
+        for i in 1:stride:size(x,1)
+            for j in 1:stride:size(x,2)
+                if pool_type == "max"
+                    output[fld(i,stride)+1, fld(j,stride)+1, channel] = maximum(x[i:i+kernel-1,j:j+kernel-1])
+                elseif pool_type == "mean"
+                    output[fld(i,stride)+1, fld(j,stride)+1, channel] = mean(x[i:i+kernel-1,j:j+kernel-1, channel])
+                end
+            end
+        end
+    end      
+    return output
+end
+a = [0.9248 0.9596 0.5058 0.1116
+    0.1032 0.8585 0.0782 0.4548
+    0.8798 0.6298 0.7401 0.1560
+    0.7678 0.0892 0.9623 0.4190]
+ b = pooling(a,2)
+# y4[:,:,1]
+# z4[:,:,1]
+# re[:,:,1]
+c = pooling_backwards(y4, z4, re)
+
+# # a[3:3+2-1,3:3+2-1]
 
 
