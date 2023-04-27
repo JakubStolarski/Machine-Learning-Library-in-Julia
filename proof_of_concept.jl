@@ -84,7 +84,7 @@ end
     
 function fully_connected_backwards(x, weight, grad)
     dx =  (grad' * weight)'
-    dw = x' .* grad
+    dw = (x * grad')'
     return dx, dw
 
 end
@@ -265,7 +265,23 @@ function zero_padding(x::Array{Float64}, pad)
     return out
 end
 
- function int_to_array(x::Int64, length::Int64)
+using Plots
+
+function display_image(image::Array{Float64,2})
+    plot(
+        heatmap(image,
+                aspect_ratio=:equal,
+                frame=:none,
+                c=:grays,
+                colorbar=false,
+                legend=false),
+        ticks=nothing,
+        border=:none,
+        axis=:off
+    )
+end
+
+function int_to_array(x::Int64, length::Int64)
     output = zeros(length)
     output[x+1] = 1
     return output'
@@ -393,7 +409,7 @@ function load_test_data(shape::Tuple=(32,32), batch_size::Int=64)
         push!(resized_images, resized_img)
     end
     
-    num_samples = length(images_resized)
+    num_samples = length(resized_images)
     num_batches = div(num_samples, batch_size)
     batches = []
     indices = shuffle(1:num_samples)
@@ -427,7 +443,7 @@ function forward(net::LeNet5, input::Union{Matrix{Float64},Vector})
     return forward_results
 end
 
-function backward(model::LeNet5, image::Array, preds::Vector, loss::Number, dest::Int64, learning_rate::Float64=0.16)
+function backward(model::LeNet5, image::Array, preds::Vector, loss::Number, dest::Int64, learning_rate::Float64=0.0016)
     
     # zero grad
     grad_c1 = zeros(size(model.conv1.weights))
@@ -439,7 +455,7 @@ function backward(model::LeNet5, image::Array, preds::Vector, loss::Number, dest
     # Create graph and calculate grad for loss function
     graph = copy(preds); push!(graph, loss)
     # gradients = fill(nothing, (1,length(preds))); push!(gradients, cross_entropy_loss_backwards(last(preds),dest))
-    curr_grad = cross_entropy_loss_backwards(last(preds),dest)
+    curr_grad = cross_entropy_loss_backwards(preds[end-1],dest)
     sequence = ["conv1", net.conv1.activation,pooling,"conv2",net.conv2.activation,pooling,"deflatten","fc1",net.fc1.activation,"fc2",net.fc2.activation,"fc3",net.fc3.activation]
     # Backpropagate through each layer
     for i = length(graph):-1:1
@@ -472,258 +488,123 @@ function backward(model::LeNet5, image::Array, preds::Vector, loss::Number, dest
     model.fc2.weights += learning_rate .* grad_fc2
     model.fc3.weights += learning_rate .* grad_fc3
     return loss, model
+#     return grad_c1, grad_c2, grad_fc1, grad_fc2, grad_fc3
 end
 
-function training(model::LeNet5, train_data::Vector, criterion::Function, num_of_epochs::Int64=10, batch_size::Int64=64)
-    num_of_steps = length(train_data)
+using Statistics
+""" 
+    Training that takes uses every individual image and label for backpropagation
+"""
+
+function training_naive(net::LeNet5, train_data::Vector, criterion::Function, num_of_epochs::Int64=10, batches_per_epoch::Int64=50, batch_size::Int64=64)
+    # Forward and backward inference example
+    loss_report = fld(batches_per_epoch, 2)  # Report on loss twice per epoch
     for epoch in 1:num_of_epochs
-        j = 1
-        for batch in 1:num_of_steps
-            images = train_data[batch][1]
-            labels = train_data[batch][2]
-            gradients = []
-            i = 1
-            for(image,label) in zip(images,labels)
-                outputs = forward(model, image)
-                loss = criterion(last(outputs), label)
-                loss, model = backward(model, image, outputs, loss, label)
-                # push!(loss, criterion(last(outputs), label))
-                i = i + 1
-                println("loss:", loss, "num:", i)
-            end
-            println("Batch:", loss, "num:", j)
-            j = j+1
-        end
         
-       
-    end
-    end
+        losses_in_epoch = []
+        
+        for batch in 1:batches_per_epoch
+            
+            preds_stack = []
+            
+            for observation in 1:batch_size
+                
+                image = train_data[batch][1][observation]
+                dest = train_data[batch][2][observation]
 
+                preds = forward(net, image)
+                last(preds)
+                loss = criterion(last(preds), dest)
+                push!(losses_in_epoch,loss)
+                loss1, net = backward(net,image,preds,loss,dest,0.016)
 
-# Forward and backward inference example
-train_data = load_train_data()
-net = intialize_network()
-u = train_data[1][1][:]
-dest = train_data[1][2][:]
-for k in 1:10
-    count = 1
-    for i in 1:937
-        for j in 1:64
-            count += 1
-            u1 = train_data[i][1][j]
-            dest1 = train_data[1][2][j]
-
-            preds = forward(net, u1)
-            last(preds)
-            loss = cross_entropy_loss(last(preds), dest1)
-            loss1, net = backward(net,u1,preds,loss,dest1)
-                if count%500 == 0
-                    println(loss)
-                end
-    #             if isnan(loss)
-    #                 println(preds[end-1])
-    #                 println("BREAK ON ", i)
-    #                 break
-    #             end
-        end
-    end
-end
-# println(preds[end-1])
-# println(dest)
-
-
-
-# @time u = train_data[1][1][2]
-# @time dest = train_data[1][2][2]
-# @time preds = forward(net, u)
-# @time loss = cross_entropy_loss(last(preds), 1)
-# @time loss, net = backward(net,u,preds,loss,dest) 
-# print(loss)
-#@time training(net, train_data, cross_entropy_loss,1)
-
-v = train_data[8][1][51]
-
-preds = forward(net, v)
-@show train_data[8][2][51]
-# display_image(train_data[8][1][32])
-preds[12]
-
-# Forward and backward inference example
-train_data = load_train_data()
-net = intialize_network()
-num_of_epochs=10
-batch_size=64
-num_of_steps = length(train_data)
-
-for epoch in 1:num_of_epochs
-    j = 1
-    for batch in 1:num_of_steps
-    images = train_data[batch][1]
-    labels = train_data[batch][2]
-    for (image,label) in zip(images,labels)
-        preds = forward(net, image)
-        last(preds)
-        loss = cross_entropy_loss(last(preds), label)
-        loss1, net = backward(net,image,preds,loss,label)
-        j += 1
-            if j%1000 == 0
-#                 println(label)
-                println(loss)
             end
-#             if isnan(loss)
-#                 println(preds[end-1])
-#                 println("BREAK ON ", j)
-#                 break
-#             end
+
+            if batch%loss_report == 0
+                println("LOSS: ", mean(losses_in_epoch), " EPOCH: ", epoch)
+            end
+
         end
     end
-    println("++++++EPOCH: ", epoch, " DONE++++++")
 end
 
 
 
-# @time u = train_data[1][1][2]
-# @time dest = train_data[1][2][2]
-# @time preds = forward(net, u)
-# @time loss = cross_entropy_loss(last(preds), 1)
-# @time loss, net = backward(net,u,preds,loss,dest) 
-# print(loss)
-#@time training(net, train_data, cross_entropy_loss,1)
+using Statistics
 
-# training(net,train_data,cross_entropy_loss)
-train_data = load_train_data()
-net = intialize_network()
-for i in 1:937
-    for j in 1:64
-        image = train_data[i][1][j]
-        label = train_data[i][2][j]
-        outputs = forward(net, image)
-        loss = cross_entropy_loss(last(outputs), label)
-        a = net.conv1.weights
-        loss, net = backward(net, image, outputs, loss, label)
-        println(output[13])
+""" 
+Training that includes batches 
+WIP
+
+"""
+
+function training(net::LeNet5, train_data::Vector, criterion::Function, num_of_epochs::Int64=10, batches_per_epoch::Int64=50, batch_size::Int64=64)
+    loss_report = fld(batches_per_epoch, 2)  # Report on loss twice per epoch
+    for k in 1:num_of_epochs
+        
+    losses_in_epoch = []
+        
+    for i in 1:batches_per_epoch
+            
+        preds_stack = []
+            
+        for j in 1:batch_size
+                
+            image = train_data[i][1][j]
+            dest = train_data[i][2][j]
+
+            preds = forward(net, image)
+            push!(preds_stack,preds)
+            loss = criterion(last(preds), dest)
+            push!(losses_in_epoch,loss)
+        end
+            
+        loss_m = mean(losses_in_epoch)
+            
+        for l in 1:64
+            image1 = train_data[i][1][l]
+            dest1 = train_data[i][2][l]
+            preds1 = preds_stack[l]
+            loss1, net = backward(net,image_1,preds1,loss_m,dest1)
+        end
+
+        if batch%loss_report == 0
+             @show mean(loss2), k
+        end
     end
-    
-    println(loss, " ", i)
+    end
 end
 
-
-function convolution_backwards(input::Array{Float64}, kernel::Array{Float64}, grad::Array{Float64})
-    pad_grad = zero_padding(grad,4)
-    dx = convolution_back_x(pad_grad, kernel)
-    dw = convolution_back_weights(input, grad)
-    return dx, dw
+function testing(net::LeNet5, test_data::Vector, batch_size::Int64=64)
+    correct = 0
+    data_length = length(test_data)
+    acc_report = fld(data_length, 10)  # Report on loss ten times in set
+    accuracy_stack = []
+    for test_batch in 1:data_length
+        for observation in 1:batch_size
+            
+            image = test_data[test_batch][1][observation]
+            dest = test_data[test_batch][2][observation]
+            preds = forward(net, image)
+            if findmax(last(preds))[2]-1 == dest
+                correct += 1
+            end
+        end 
+        
+    if test_batch%acc_report ==0
+        accuracy = correct/(test_batch*64)
+        println("++++ ON: ", test_batch*64, " IMAGES ++++ ACC: ", round(accuracy*100,digits=2), "% ++++")
+    end
+        
+    end
+    println("++++ FINAL ACC: ", round(correct/(data_length*64) * 100, digits=2), "% ++++" )
 end
 
-# @time train_data = load_train_data()
+net = intialize_network()
+train_data = load_train_data()
+test_data = load_test_data()
 
-# @time u = train_data[1][1][2]
-@time net = intialize_network()
-# o = forward(net, u)
-# loss = cross_entropy_loss(last(o), 1)
-
-# x = fully_connected(x, net.fc2.weights); push!(forward_results,x)
-# x = net.fc2.activation(x); push!(forward_results,x)
-# x = convolution(u, net.conv1.weights)
-# x = net.conv1.activation(x)  
-# x = pooling(x)
-# size(u,3)
-
-fc1 = DenseLayer(400, 120, softmax)
-fc2 = DenseLayer(120, 84, softmax)
-fc3 = DenseLayer(84, 10, softmax)
-conv2 = ConvLayer(6, 16, 5, relu)
-conv1 = ConvLayer(1, 6, 5, relu)
-input = train_data[1][1][2]
-x5 = convolution(u,conv1.weights)
-y5 = relu(x5)
-z5 = pooling(y5)
-
-x4 = convolution(z5,conv2.weights)
-y4 = relu(x4)
-z4 = pooling(y4)
-
-z4f = vec(z4)
-x3 = fully_connected(z4f, fc1.weights)
-y3 = relu(x3)
-
-x2 = fully_connected(y3, fc2.weights)
-y2 = relu(x2)
-
-x = fully_connected(y2, fc3.weights) 
-y = softmax(x)
-l = cross_entropy_loss(y, train_data[1][2][2])
-
-l1 = cross_entropy_loss_backwards(y, train_data[1][2][2])
-
-
-y1 = softmax_backwards(y) * l1
-dx, dw = fully_connected_backwards(y2,fc3.weights,y1)
-
-dr = relu_backwards(y2) .* dx
-dx1, dw1 = fully_connected_backwards(y3,fc2.weights,dr)
-
-dr1 = relu_backwards(y3) .* dx1 
-dx2, dw2 = fully_connected_backwards(z4f,fc1.weights,dr1)
-
-re = reshape(dx2,5,5,16)
-
-dm1 = pooling_backwards(y4, z4, re)
-dr3 = relu_backwards(x4) .* dm1
-dconv2,dcw2 = convolution_backwards(z5,conv2.weights,dr3)
-
-dm2 = pooling_backwards(y5, z5, dconv2) 
-dr4 = relu_backwards(x5) .* dm2
-dconv3,dcw3 = convolution_backwards(u,conv1.weights,dr4)
-
-if x == fully_connected(y2, fc3.weights)
-    print("yes")
-end
-# dr4a = zero_padding(dr4,4)
-# dconv3 = convolution_back_x(dr4a, conv1.weights)
-# dcw3 = convolution_back_weights(input, dr4)
-
-
-# # dconv3, dcw3 = convolution_backwards(input,conv1.weights,dr4)
-# # dcw3
-# # # y2
-
-using Plots
-
-"""
-    display_image(image::Array{Float64,2})
-Display a 2D array as an image.
-
-# Arguments
-- `image::Array{Float64,2}`: The 2D array representing the image.
-
-"""
-function display_image(image::Array{Float64,2})
-    plot(
-        heatmap(image,
-                aspect_ratio=:equal,
-                frame=:none,
-                c=:grays,
-                colorbar=false,
-                legend=false),
-        ticks=nothing,
-        border=:none,
-        axis=:off
-    )
-end
-
-a = [0.9248 0.9596 0.5058 0.1116
-    0.1032 0.8585 0.0782 0.4548
-    0.8798 0.6298 0.7401 0.1560
-    0.7678 0.0892 0.9623 0.4190]
- b = pooling(a,2)
-# y4[:,:,1]
-# z4[:,:,1]
-# re[:,:,1]
-c = pooling_backwards(y4, z4, re)
-c
-# # a[3:3+2-1,3:3+2-1]
-
-
+training_naive(net,train_data,cross_entropy_loss)
+testing(net,test_data)
 
 
